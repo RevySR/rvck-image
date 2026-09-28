@@ -1,0 +1,7 @@
+This image initially boots with openEuler GRUB.
+After entering openRuyi, replace it with the distribution's GRUB:
+
+    sudo dnf5 reinstall grub
+    sudo openruyi-install-grub
+
+The reminder is removed after a successful installation.

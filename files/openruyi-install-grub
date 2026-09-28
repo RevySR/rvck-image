@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-2.0
+set -Eeuo pipefail
+export PATH=/usr/sbin:/usr/bin:/sbin:/bin:$PATH
+[[ $EUID == 0 ]] || { echo 'Run with sudo/root.' >&2; exit 1; }
+mountpoint -q /boot/efi || {
+    echo 'Mount the EFI System Partition at /boot/efi first.' >&2
+    exit 1
+}
+for tool in grub-install grub-mkconfig grub-script-check; do
+    command -v "$tool" >/dev/null || {
+        echo 'Install the openRuyi grub package with dnf5 first.' >&2
+        exit 1
+    }
+done
+mkdir -p /boot/grub
+config=$(mktemp /boot/grub/grub.cfg.XXXXXX)
+trap 'rm -f "$config"' EXIT
+grub-mkconfig -o "$config"
+grub-script-check "$config"
+grub-install --target=riscv64-efi --efi-directory=/boot/efi \
+    --bootloader-id=openRuyi --no-nvram
+grub-install --target=riscv64-efi --efi-directory=/boot/efi \
+    --removable --no-nvram
+mv "$config" /boot/grub/grub.cfg
+for directory in BOOT openRuyi openEuler; do
+    mkdir -p "/boot/efi/EFI/$directory"
+    cp /boot/grub/grub.cfg "/boot/efi/EFI/$directory/grub.cfg"
+done
+sync
+rm -f /etc/motd.d/80-openruyi-grub /etc/profile.d/openruyi-grub.sh
+echo 'openRuyi GRUB installed in the vendor and fallback EFI paths.'

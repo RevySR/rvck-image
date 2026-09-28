@@ -155,6 +155,12 @@ done
 install -m 644 "$grub" "$work/esp-tree/EFI/BOOT/BOOTRISCV64.EFI"
 install -m 644 "$grub" "$work/esp-tree/EFI/$label/grubriscv64.efi"
 mcopy -i "$work/esp.img" -s "$work/esp-tree/EFI" ::/
+if [[ $distro == ruyi ]]; then
+    install -D -m 644 "$SCRIPT_DIR/files/grub-notice" \
+        "$root/etc/motd.d/80-openruyi-grub"
+    install -D -m 644 "$SCRIPT_DIR/files/grub-profile.sh" \
+        "$root/etc/profile.d/openruyi-grub.sh"
+fi
 printf 'source=%s\nsha256=%s\n' "$grub_source" "$grub_sha" \
     > "$metadata/initial-grub"
 root_mib=$((size * 1024 - 514))

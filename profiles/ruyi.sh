@@ -39,6 +39,8 @@ configure_rootfs() {
             chroot "$root" systemctl disable "$unit"
         fi
     done
+    install -D -m 755 "$SCRIPT_DIR/files/openruyi-install-grub" \
+        "$root/usr/sbin/openruyi-install-grub"
     mkdir -p "$root/etc/repart.d" "$root/etc/cloud/cloud.cfg.d"
     cat > "$root/etc/repart.d/50-root.conf" <<EOF
 [Partition]

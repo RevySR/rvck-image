@@ -66,6 +66,17 @@ is `openruyi`, the timezone is UTC and the locale is `C.UTF-8`.
 NetworkManager and SSH are enabled. Desktop and live installer profiles
 are not included.
 
+The initial EFI loader is openEuler GRUB. A login reminder requests:
+
+```sh
+sudo dnf5 reinstall grub
+sudo openruyi-install-grub
+```
+
+The helper installs openRuyi GRUB in both its vendor directory and the
+removable-media EFI path, then removes the reminder. The ESP must be
+mounted at `/boot/efi`; the image's fstab provides this mount.
+
 ## openEuler
 
 The original RVA20 workflow remains available. Supply a RISC-V kernel
@@ -82,7 +93,7 @@ sudo ./image.sh --rootfs out/openeuler-rva20-rootfs.tar \
 The root password remains `openEuler12#$`, as in the original project.
 The hostname is `rvck`. Root SSH password login is disabled; use a key.
 This profile uses openEuler packages and `grub2-*` tools. It does not
-install openRuyi account settings.
+install openRuyi account settings or the GRUB replacement reminder.
 
 ## Common options
 

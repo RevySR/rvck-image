@@ -183,6 +183,22 @@ beside the outputs as `.rvck-rootfs.*` and `.rvck-image.*` for inspection.
 Outputs are hard links to the corresponding files in staging. Download
 caches default to `.image-cache/DISTRO/ISA` beside the rootfs output.
 
+## Validation
+
+Run the input regression tests without root:
+
+```sh
+python3 tests/test_inputs.py -v
+```
+
+The tests build small RPM and Debian fixtures, exercise the source-tree
+Makefile interface and validate architecture, EFI headers and input
+selection. They use no mounts, network or real kernel compilation.
+Package tests are skipped if the relevant host packaging tool is absent.
+
+Input tests and shell syntax checks pass. Full image builds and boot
+tests remain to be run for both distributions.
+
 [upstream]: https://github.com/RevySR/rvck-image/
 [kiwi]: https://github.com/openRuyi-Project/kiwi-image/blob/2a03a5de58ae2d6ea710d81d33d8828efefcc62a/image.kiwi
 [loader]: https://dl-cdn.openeuler.openatom.cn/openEuler-24.03-LTS-SP3/OS/riscv64/rva20/riscv64/EFI/BOOT/grubriscv64.EFI

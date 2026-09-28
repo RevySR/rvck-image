@@ -2,91 +2,154 @@
 # SPDX-License-Identifier: GPL-2.0
 source "$(dirname "$(readlink -f "$0")")/common.sh"
 usage() {
-    echo "Usage: $0 --output ROOTFS.tar [--repo URL] [--ssh-key PUBLIC_KEY] [--root-password-hash FILE]"
-    echo "Build openEuler 24.03-LTS-SP3 RVA20 rootfs using DNF. Requires root."
+    cat <<EOF_USAGE
+Usage: $0 --output ROOTFS.tar [options]
+  --distro ruyi|euler      Distribution (default: ruyi)
+  --isa rva20|rva23        Repository profile (default: rva20)
+  --repo URL              Override the selected repository
+  --cache-dir DIR         Reuse downloaded RPMs (default: beside output)
+  --ssh-key FILE          Public key for the default accounts
+  --password-hash FILE    Override their default password hash
+  --print-packages        Print the selected package list and exit
+Build a reusable rootfs; supply the kernel separately to image.sh.
+openRuyi uses unstable; openEuler uses 24.03-LTS-SP3 RVA20.
+Run with sudo. Host tools are checked, never installed automatically.
+EOF_USAGE
 }
-output= repo=$REPO_DEFAULT ssh_key= password_hash=
+output= distro=ruyi isa=rva20 repo= cache_dir= ssh_key= password_hash=
+print_only=0
+original=("$@")
 while (($#)); do
     case $1 in
         --output) value "$@"; output=$2; shift 2;;
+        --distro) value "$@"; distro=$2; shift 2;;
+        --isa) value "$@"; isa=$2; shift 2;;
         --repo) value "$@"; repo=${2%/}; shift 2;;
+        --cache-dir) value "$@"; cache_dir=$(realpath -m "$2"); shift 2;;
         --ssh-key) value "$@"; ssh_key=$(realpath "$2"); shift 2;;
-        --root-password-hash) value "$@"; password_hash=$(realpath "$2"); shift 2;;
+        --password-hash|--root-password-hash)
+            value "$@"; password_hash=$(realpath "$2"); shift 2;;
+        --print-packages) print_only=1; shift;;
         -h|--help) usage; exit 0;;
         *) die "unknown argument: $1";;
     esac
 done
+load_profile "$distro" "$isa"
+repo=${repo:-$default_repo}
+[[ $repo =~ ^https?://[^[:space:]]+$ ]] || die "invalid repository URL"
+mapfile -t packages < <(sed '/^#/d; /^$/d' \
+    "$SCRIPT_DIR/packages/$package_list")
+if ((print_only)); then printf '%s\n' "${packages[@]}"; exit 0; fi
 [[ -n $output ]] || { usage; exit 1; }
-fresh_output "$output"
-output=$(realpath -m "$output")
-# Reconstruct parsed arguments for the mount-namespace re-exec.
-args=(--output "$output" --repo "$repo")
-[[ -z $ssh_key ]] || args+=(--ssh-key "$ssh_key")
-[[ -z $password_hash ]] || args+=(--root-password-hash "$password_hash")
-need dnf curl tar unshare chroot mount umount
-private_mounts "${args[@]}"
-check_arch
-work=$(mktemp -d "$(dirname "$output")/.rvck-rootfs.XXXXXX")
-root=$work/root
-mkdir -p "$root/etc/yum.repos.d"
-trap cleanup EXIT
-curl --fail --location --retry 3 "$repo/RPM-GPG-KEY-openEuler" -o "$work/RPM-GPG-KEY-openEuler"
-cat > "$work/dnf.conf" <<EOF
-[main]
-reposdir=$work/repos
-install_weak_deps=False
-keepcache=True
-gpgcheck=True
-[rvck-rva20]
-name=openEuler 24.03 LTS SP3 RVA20
-baseurl=$repo
-enabled=True
-gpgcheck=True
-gpgkey=file://$work/RPM-GPG-KEY-openEuler
-EOF
-mkdir -p "$work/repos"
-mount_guest "$root"
-dnf -y -c "$work/dnf.conf" --installroot="$root" --releasever=24.03 \
-    --forcearch=riscv64 --setopt=module_platform_id=platform:oe2403 \
-    --disablerepo='*' --enablerepo=rvck-rva20 install \
-    basesystem filesystem bash coreutils systemd systemd-udev passwd shadow \
-    util-linux e2fsprogs dosfstools kmod dracut dracut-network \
-    NetworkManager openssh-server openssh-clients iproute iputils \
-    dnf rpm ca-certificates linux-firmware \
-    grub2-common grub2-tools grub2-tools-minimal grub2-efi-riscv64-modules
-unmount_guest
-mkdir -p "$root/etc/pki/rpm-gpg" "$root/etc/ssh/sshd_config.d" "$root/etc/yum.repos.d/rvck" "$root/etc/dnf"
-cp "$work/RPM-GPG-KEY-openEuler" "$root/etc/pki/rpm-gpg/"
-# Isolate runtime repositories too: release packages may ship non-RVA20 repos.
-printf '[main]\nreposdir=/etc/yum.repos.d/rvck\ngpgcheck=True\n' > "$root/etc/dnf/dnf.conf"
-cat > "$root/etc/yum.repos.d/rvck/rvck-rva20.repo" <<EOF
-[rvck-rva20]
-name=openEuler 24.03 LTS SP3 RVA20
-baseurl=$repo
-enabled=1
-gpgcheck=1
-gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-openEuler
-EOF
-echo rvck > "$root/etc/hostname"
-printf '127.0.0.1 localhost\n::1 localhost\n' > "$root/etc/hosts"
-echo 'LANG=C.UTF-8' > "$root/etc/locale.conf"
-: > "$root/etc/machine-id"
+[[ -z $ssh_key || -s $ssh_key ]] || die "empty SSH public key"
 if [[ -n $password_hash ]]; then
     [[ -s $password_hash ]] || die "empty password hash file"
-    { printf 'root:'; tr -d '\r\n' < "$password_hash"; printf '\n'; } | chroot "$root" chpasswd -e
-else
-    printf '%s\n' 'root:openEuler12#$' | chroot "$root" chpasswd
+    hash=$(cat "$password_hash")
+    [[ -n $hash && $hash != *:* && $hash != *$'\n'* \
+        && $hash != *$'\r'* ]] \
+        || die "invalid password hash"
 fi
-if [[ -n $ssh_key ]]; then
-    [[ -s $ssh_key ]] || die "empty SSH public key"
-    install -d -m 700 "$root/root/.ssh"
-    install -m 600 "$ssh_key" "$root/root/.ssh/authorized_keys"
+fresh_output "$output"
+need dnf5 rpm curl tar unshare chroot mount umount mknod python3
+private_mounts "${original[@]}"
+output=$(realpath -m "$output")
+cache_dir=${cache_dir:-$(dirname "$output")/.image-cache/$distro/$isa}
+work=$(mktemp -d "$(dirname "$output")/.rvck-rootfs.XXXXXX")
+root=$work/root
+metadata=$root/usr/lib/rvck-image
+mkdir -p "$root/etc/yum.repos.d" "$work/repos" "$cache_dir"
+trap cleanup EXIT
+check_arch
+curl --fail --location --retry 3 "$repo/repodata/repomd.xml" \
+    -o "$work/repomd.xml"
+build_key= runtime_key=
+if [[ -n $repo_key ]]; then
+    curl --fail --location --retry 3 "$repo/$repo_key" \
+        -o "$work/$repo_key"
+    build_key="gpgkey=file://$work/$repo_key"
+    runtime_key="gpgkey=file:///etc/pki/rpm-gpg/$repo_key"
 fi
-printf 'PermitRootLogin prohibit-password\n' > "$root/etc/ssh/sshd_config.d/10-rvck.conf"
-chroot "$root" systemctl enable NetworkManager sshd
+cat > "$work/dnf.conf" <<EOF_DNF
+[main]
+reposdir=$work/repos
+install_weak_deps=$weak_deps
+keepcache=True
+gpgcheck=$gpgcheck
+exclude=kiwi* python*-kiwi* dracut-kiwi-* $kernel_excludes
+[image-$distro-$isa]
+name=$label $isa
+baseurl=$repo
+enabled=True
+gpgcheck=$gpgcheck
+$build_key
+EOF_DNF
+# Match the host transaction database for target RPM scriptlets too.
+dbpath=$(rpm --eval '%{_dbpath}')
+[[ $dbpath == /* && $dbpath != *'%'* ]] || die "invalid host RPM db path"
+mkdir -p "$root/etc/rpm"
+printf '%%_dbpath %s\n' "$dbpath" > "$root/etc/rpm/macros.image-db"
+dnf_args=(-y --config="$work/dnf.conf" --use-host-config
+    --installroot="$root" --releasever="$releasever" --forcearch=riscv64
+    --setopt="system_cachedir=$cache_dir" --setopt="logdir=$work/log"
+    --disable-repo='*' --enable-repo="image-$distro-$isa")
+if [[ $distro == euler ]]; then
+    dnf_args+=(--setopt=module_platform_id=platform:oe2403)
+fi
+# Install the directory layout before preparing the chroot.
+dnf5 "${dnf_args[@]}" install filesystem
+mount_guest "$root"
+# Install the shell before packages with pre-transaction scriptlets.
+dnf5 "${dnf_args[@]}" install "${bootstrap[@]}"
+mkdir -p "$root/etc/dracut.conf.d"
+printf 'hostonly="no"\nhostonly_cmdline="no"\n' \
+    > "$root/etc/dracut.conf.d/90-image.conf"
+dnf5 "${dnf_args[@]}" install "${packages[@]}"
+chroot "$root" /bin/bash -c 'test "$(uname -m)" = riscv64'
+mkdir -p "$root/etc/yum.repos.d/image" "$metadata" "$root/etc/dnf"
+cat > "$root/etc/dnf/dnf.conf" <<EOF_DNF
+[main]
+reposdir=/etc/yum.repos.d/image
+install_weak_deps=$weak_deps
+gpgcheck=$gpgcheck
+EOF_DNF
+cat > "$root/etc/yum.repos.d/image/image.repo" <<EOF_REPO
+[image-$distro-$isa]
+name=$label $isa
+baseurl=$repo
+enabled=1
+gpgcheck=$gpgcheck
+$runtime_key
+EOF_REPO
+if [[ -n $repo_key ]]; then
+    install -D -m 644 "$work/$repo_key" \
+        "$root/etc/pki/rpm-gpg/$repo_key"
+fi
+printf '%s\n' "$distro" > "$metadata/distro"
+printf '%s\n' "$isa" > "$metadata/isa"
+printf '%s\n' "$repo" > "$metadata/repository"
+cp "$work/repomd.xml" "$metadata/repomd.xml"
+printf '%s\n' "${packages[@]}" > "$metadata/requested-packages"
+chroot "$root" rpm -qa --qf '%{NAME}-%{VERSION}-%{RELEASE}.%{ARCH}\n' \
+    | sort > "$metadata/packages"
+if grep -E '^(kiwi|python[^-]*-kiwi|dracut-kiwi)' \
+    "$metadata/packages"; then
+    die "unexpected Kiwi component installed"
+fi
+echo "$hostname" > "$root/etc/hostname"
+printf '127.0.0.1 localhost\n::1 localhost\n' > "$root/etc/hosts"
+echo 'LANG=C.UTF-8' > "$root/etc/locale.conf"
+ln -snf /usr/share/zoneinfo/UTC "$root/etc/localtime"
+configure_rootfs
+chroot "$root" systemctl enable NetworkManager.service sshd.service
 chroot "$root" systemctl set-default multi-user.target
-# NetworkManager's default wired auto-connection provides DHCP.
-tar --numeric-owner --xattrs --acls -C "$root" -cpf "$work/rootfs.tar" .
+chroot "$root" update-ca-trust
+: > "$root/etc/machine-id"
+mkdir -p "$root/var/lib/dbus"
+rm -f "$root/var/lib/dbus/machine-id" "$root/etc/ssh/ssh_host_"*
+ln -s /etc/machine-id "$root/var/lib/dbus/machine-id"
+unmount_guest
+tar --numeric-owner --xattrs --xattrs-include='*' --acls \
+    -C "$root" -cpf "$work/rootfs.tar" .
 ln "$work/rootfs.tar" "$output"
-echo "Rootfs: $output"
-echo "Staging/cache retained: $work"
+echo "Rootfs: $output ($label, $isa)"
+echo "Staging retained: $work"

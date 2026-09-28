@@ -1,144 +1,177 @@
-# RVCK / openEuler RVA20 EDK2 镜像工具
+# RISC-V disk images
 
-`rootfs.sh` 生成 openEuler rootfs，`image.sh` 装入内核并制作磁盘镜像。
-更换内核时可以复用 rootfs。默认使用以下 RVA20 仓库：
-<https://dl-cdn.openeuler.openatom.cn/openEuler-24.03-LTS-SP3/OS/riscv64/rva20/riscv64/>。
-构建和镜像内的 DNF 都只使用此 RVA20 源。
+Build openRuyi or openEuler root filesystems and bootable raw `.img`
+files. This project is based on [RevySR/rvck-image][upstream] and keeps
+its GPL-2.0 license.
 
-## 构建环境
+| Profile | Repository | ISA | Kernel |
+| --- | --- | --- | --- |
+| `ruyi` | openRuyi unstable | RVA20 / RVA23 | External input |
+| `euler` | openEuler 24.03-LTS-SP3 | RVA20 | External input |
 
-需要 Linux、root 权限、网络以及 DNF 4、RPM、rpm2cpio、cpio、curl、tar、
-util-linux（unshare/losetup 等基础工具）、gdisk（sgdisk）、
-dosfstools、e2fsprogs、file、coreutils。
-可在 riscv64 主机运行；x86_64/aarch64 主机需要注册带 `F` 标志的
-`qemu-riscv64` binfmt_misc，让 RPM scriptlet 和 chroot 中的子进程可以执行。
-脚本检查现有注册，不会修改宿主机的 binfmt 配置。
+The default profile is `ruyi`. It selects the common, bootstrap and
+`installiso` packages from
+[kiwi-image][kiwi] at revision
+`2a03a5de58ae2d6ea710d81d33d8828efefcc62a`. Kiwi and its dracut modules
+are excluded, along with the repository kernel. The package list also
+includes filesystem and image-building dependencies. This creates an
+installed disk image,
+not an installer ISO. Both rootfs profiles contain userspace only.
+The same rootfs can be reused with different compatible RISC-V kernels,
+including RVCK, A210 or other platform trees. No board name or kernel
+version is fixed by the distribution profile.
 
-Debian/Ubuntu 依赖：
+## Host requirements
+
+Run the scripts with `sudo` on Linux. Required host commands come from
+DNF5, RPM, curl, GNU tar, util-linux, GNU parted, dosfstools, e2fsprogs,
+mtools, Python 3, file and coreutils. Custom kernel RPM inputs also need
+rpm2cpio and cpio; Debian packages need dpkg-deb. Source builds require
+the kernel's build dependencies and a suitable compiler.
+
+On a non-RISC-V host, enable a `qemu-riscv64` binfmt handler with the `F`
+flag. The scripts test the existing handler without registering one.
+QEMU must support the selected ISA; emulated builds use `QEMU_CPU=max`
+unless overridden. RVA23 images require an RVA23-capable target.
+
+Missing tools are reported. The scripts do not install host packages.
+They download target RPMs and the selected EFI loader during a build.
+Host dracut is not required: depmod and dracut run inside the rootfs.
+
+Builds use private mount and PID namespaces. They create minimal character
+nodes in the staging rootfs and mount `/proc` there for RPM hooks and
+Bash process substitution. Host `/dev` and `/sys` are not bind-mounted.
+The `/proc` mount is removed on exit. Thus the build is not entirely
+mount-free, but needs no loop devices or physical disk access.
+
+## openRuyi
 
 ```sh
-sudo apt-get install dnf rpm rpm2cpio cpio curl tar util-linux gdisk \
-  dosfstools e2fsprogs file qemu-user-static binfmt-support
-sudo update-binfmts --enable qemu-riscv64
-cat /proc/sys/fs/binfmt_misc/qemu-riscv64
-```
-
-`flags:` 必须包含 `F`。原生 riscv64 主机无需 QEMU user。
-在容器内运行时需要 loop 设备及 mount 权限。
-
-## 1. 生成 rootfs
-
-在工具目录执行，替换示例路径。输出目录须已存在。
-
-```sh
-sudo ./rootfs.sh \
-  --output /path/to/openeuler-rva20-rootfs.tar \
-  --ssh-key /path/to/id_ed25519.pub
-```
-
-包含 systemd、NetworkManager/DHCP、SSH、DNF、dracut、GRUB 配置工具和 linux-firmware。
-默认用户为 `root`，密码为 `openEuler12#$`，可用于串口登录。
-如需覆盖默认密码，预先用 `openssl passwd -6` 生成密码哈希文件，
-再传入 `--root-password-hash /path/to/root.hash`。
-SSH root 密码登录仍禁用；上例配置的公钥可用于 SSH 登录。
-首次启动时 systemd/sshd 生成机器 ID 和 SSH 主机密钥。
-
-## 2. 安装 RVCK 内核并生成硬盘镜像
-
-使用 RISC-V 内核 RPM（`--kernel-rpm` 可以重复，以加入拆分的 modules RPM）：
-
-```sh
-sudo ./image.sh \
-  --rootfs /path/to/openeuler-rva20-rootfs.tar \
+mkdir -p out
+sudo ./rootfs.sh --distro ruyi --isa rva20 \
+  --output out/openruyi-rva20-rootfs.tar
+sudo ./image.sh --rootfs out/openruyi-rva20-rootfs.tar \
   --kernel-rpm /path/to/kernel.riscv64.rpm \
-  --output /path/to/rvck-rva20.img \
-  --size-gib 8
+  --output out/openruyi-rva20.img
 ```
 
-脚本解包 RPM 后运行 depmod 和 dracut，不执行 RPM 安装脚本或更新 RPM 数据库。
-内核包需包含配置和同版本模块，支持 `/lib/modules` 和 `/usr/lib/modules`。
-内核必须是未压缩的 RISC-V EFI-stub Image。
+For RVA23, change `--isa rva20` to `--isa rva23` and choose new output
+names. The repositories are `https://boat.openruyi.cn/unstable/rva20/`
+and `https://boat.openruyi.cn/unstable/rva23/`. Both use `riscv64` RPMs.
+`image.sh` reads the distribution and ISA recorded in the rootfs.
 
-也可以直接编译已配置的源码树：
+The default accounts are `root` and `openruyi`, with the password hash
+from the Kiwi configuration. `openruyi` belongs to `wheel`. The hostname
+is `openruyi`, the timezone is UTC and the locale is `C.UTF-8`.
+NetworkManager and SSH are enabled. Desktop and live installer profiles
+are not included.
+
+## openEuler
+
+The original RVA20 workflow remains available. Supply a RISC-V kernel
+RPM, Debian package, or configured source tree when creating the image:
 
 ```sh
-sudo ./image.sh \
-  --rootfs /path/to/openeuler-rva20-rootfs.tar \
-  --kernel-tree /path/to/linux-tree --cross-compile riscv64-linux-gnu- --jobs "$(nproc)" \
-  --output /path/to/rvck-rva20.img
+sudo ./rootfs.sh --distro euler --isa rva20 \
+  --output out/openeuler-rva20-rootfs.tar
+sudo ./image.sh --rootfs out/openeuler-rva20-rootfs.tar \
+  --kernel-rpm /path/to/kernel.riscv64.rpm \
+  --output out/openeuler-rva20.img
 ```
 
-源码模式执行 `make Image modules`，再安装到镜像。需要先配置
-`.config`，例如 `make ARCH=riscv CROSS_COMPILE=riscv64-linux-gnu- rvck_defconfig`。
-原生 riscv64 构建不需要 `--cross-compile`。工具链和内核构建依赖需自行安装。
-需要 RPM 包时，在源码树执行：
+The root password remains `openEuler12#$`, as in the original project.
+The hostname is `rvck`. Root SSH password login is disabled; use a key.
+This profile uses openEuler packages and `grub2-*` tools. It does not
+install openRuyi account settings.
+
+## Common options
+
+`rootfs.sh --repo URL` overrides the selected repository. Runtime DNF
+uses only that repository as well. `--cache-dir DIR` reuses RPM downloads.
+`--ssh-key FILE` installs a public key for the profile's default accounts.
+`--password-hash FILE` overrides their passwords with a crypt-format
+hash; `--root-password-hash` remains an alias. On openRuyi it applies to
+both accounts. `--print-packages` lists packages without root access.
+
+For either distribution, select exactly one kernel source when running
+`image.sh`. There is no implicit fallback to a rootfs kernel:
+
+- `--kernel-rpm FILE`, repeatable for split kernel and modules packages.
+- `--kernel-deb FILE` for a RISC-V Debian kernel package.
+- `--kernel-tree DIR` for a configured source/build tree; optionally add
+  `--cross-compile PREFIX` and `--jobs N`.
+
+Custom packages are extracted without executing installation hooks or
+registering them in the rootfs package database. They must include
+matching modules and a RISC-V kernel Image with EFI stub support.
+Raw and gzip, bzip2, xz, lzma, lz4, lzop or zstd-compressed Images are
+accepted; compressed inputs require the corresponding host decompressor.
+Missing decompressors are reported without installing anything. Kernel
+packages using `/lib/modules/VERSION/vmlinuz` are supported, including
+those with generated `/boot` entries. The matching `config` and
+`System.map` are copied from either location. `--kernel-image FILE` can
+override the Image. The caller must ensure it matches the modules. If several versions exist, select one
+with `--kernel-version VER`. For example, use a Debian kernel package:
 
 ```sh
-make ARCH=riscv CROSS_COMPILE=riscv64-linux-gnu- -j"$(nproc)" binrpm-pkg
+sudo ./image.sh --rootfs out/openruyi-rva20-rootfs.tar \
+  --kernel-deb /path/to/linux-image-custom_riscv64.deb \
+  --output out/openruyi-custom.img
 ```
 
-打包需要 rpmbuild，生成的 RPM 可传给 `--kernel-rpm`。
-RPM、源码树、Debian 包三种输入互斥。
-`.deb` 可用 `--kernel-deb 文件` 输入（宿主机另需 dpkg-deb），
-不运行 Debian 安装钩子。
-单独指定 `--kernel-image /path/to/Image` 时，必须与模块同一次构建；
-脚本只检查 Image 格式和 EFI stub，不检查它与模块是否来自同一次构建。
+Or build a configured kernel source tree directly:
 
-## 启动配置
+```sh
+sudo ./image.sh --rootfs out/openruyi-rva20-rootfs.tar \
+  --kernel-tree /path/to/linux --cross-compile riscv64-linux-gnu- \
+  --output out/openruyi-source.img
+```
 
-输出为 GPT raw 文件：512 MiB FAT32 ESP，剩余空间为 ext4 根分区。
-dracut 为所选内核生成非 host-only initramfs，并加入 virtio 驱动。
-内核和 GRUB 都通过文件系统 UUID 查找根分区。
-默认命令行 `console=ttyS0,115200 earlycon loglevel=7`，可用 `--cmdline` 替换。
-GRUB 设置写入 `/etc/default/grub`，菜单由 rootfs 内的 `grub2-mkconfig`
-生成，再用 `grub2-script-check` 检查。BLS 和 os-prober 默认关闭。
-硬件描述由 EDK2 提供，不单独加载 DTB。
+The kernel must support the target hardware and userspace ISA. A generic
+rootfs does not add missing board drivers. Install matching modules into
+the image; dracut includes available storage drivers without requiring
+virtio to be enabled in every supplied kernel.
 
-monolithic GRUB 来自该 RVA20 仓库的 `EFI/BOOT/grubriscv64.EFI`，
-固定 SHA-256 为：
+## Disk layout and boot
+
+The default size is 4 GiB; change it with `--size-gib N` (minimum 4).
+The GPT image contains a 512 MiB FAT32 ESP and an ext4 root partition
+with the RISC-V Discoverable Partitions type. Filesystems are populated
+using mtools and `mkfs.ext4 -d`, then copied into a regular sparse file.
+Only paths for new image files are accepted as outputs.
+
+GRUB uses filesystem UUIDs. dracut creates a generic initramfs from
+the supplied kernel and modules. EDK2 supplies the hardware description.
+Default kernel command lines are `loglevel=3 audit=0 rw` for openRuyi and
+`console=ttyS0,115200 earlycon loglevel=7` for openEuler. Override them
+with `--cmdline STRING`. openRuyi includes a systemd-repart configuration
+for growing the root partition when deployed to a larger disk.
+
+Both profiles initially use the [openEuler EFI loader][loader], pinned
+by this SHA-256:
 
 ```text
 bf252892f801347e8ac001613b547d18af4618ddad79909cb133d8f70758fbc5
 ```
 
-安装为 `EFI/BOOT/BOOTRISCV64.EFI` 和 `EFI/openEuler/grubriscv64.efi`，
-生成的配置复制到两个 EFI 目录及 `/boot/grub/grub.cfg`。
-替换 EFI 文件时使用 `--grub FILE --grub-sha256 HASH`，
-该文件需内嵌菜单所用模块。脚本不签名 EFI 文件。
+Use `--grub FILE --grub-sha256 HASH` to provide a different loader with
+the required modules embedded. The scripts do not sign EFI binaries.
 
-启动后修改 `/etc/default/grub` 或更换内核时，重新生成并同步配置：
+## Provenance and build files
 
-```sh
-sudo grub2-mkconfig -o /boot/grub2/grub.cfg
-sudo grub2-script-check /boot/grub2/grub.cfg
-sudo cp /boot/grub2/grub.cfg /boot/grub/grub.cfg
-sudo cp /boot/grub2/grub.cfg /boot/efi/EFI/BOOT/grub.cfg
-sudo cp /boot/grub2/grub.cfg /boot/efi/EFI/openEuler/grub.cfg
-```
+openEuler RPM signatures are checked with its repository key. openRuyi
+currently follows Kiwi's signature policy (`gpgcheck=False`); HTTPS and
+repository checksums do not replace RPM signature verification.
 
-## EDK2 / QEMU 启动示例
+Repository metadata, requested and installed package lists, ISA and
+loader provenance are recorded in `/usr/lib/rvck-image`. Unstable is a
+moving repository; these records describe a build, not a frozen snapshot.
 
-从 openEuler 同版本 `virtual_machine_img/riscv64/` 目录准备
-`RISCV_VIRT_CODE_RVA20.fd` 和 `RISCV_VIRT_VARS_RVA20.fd`：
+Existing outputs are never overwritten. Staging directories are retained
+beside the outputs as `.rvck-rootfs.*` and `.rvck-image.*` for inspection.
+Outputs are hard links to the corresponding files in staging. Download
+caches default to `.image-cache/DISTRO/ISA` beside the rootfs output.
 
-```sh
-cp RISCV_VIRT_VARS_RVA20.fd rvck-vars.fd
-qemu-system-riscv64 \
-  -machine virt,pflash0=pflash0,pflash1=pflash1,acpi=off \
-  -cpu rv64 -m 4G -smp 4 -nographic \
-  -blockdev node-name=pflash0,driver=file,read-only=on,filename=RISCV_VIRT_CODE_RVA20.fd \
-  -blockdev node-name=pflash1,driver=file,filename=rvck-vars.fd \
-  -drive file=rvck-rva20.img,format=raw,if=none,id=disk0 \
-  -device virtio-blk-pci,drive=disk0 \
-  -netdev user,id=net0,hostfwd=tcp:127.0.0.1:2222-:22 \
-  -device virtio-net-pci,netdev=net0
-```
-
-配置公钥后可通过 `ssh -p 2222 root@127.0.0.1` 登录。
-官方固件说明：<https://github.com/openeuler-mirror/RISC-V/blob/master/doc/tutorials/vm-qemu-oErv.md>。
-
-## 临时文件
-
-脚本不会覆盖已有输出。临时目录位于输出旁的 `.rvck-rootfs.*` 和
-`.rvck-image.*`，运行结束后保留。输出 tar/img 与临时目录中的文件为硬链接。
-退出时卸载挂载点并释放 loop 设备。
+[upstream]: https://github.com/RevySR/rvck-image/
+[kiwi]: https://github.com/openRuyi-Project/kiwi-image/blob/2a03a5de58ae2d6ea710d81d33d8828efefcc62a/image.kiwi
+[loader]: https://dl-cdn.openeuler.openatom.cn/openEuler-24.03-LTS-SP3/OS/riscv64/rva20/riscv64/EFI/BOOT/grubriscv64.EFI

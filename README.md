@@ -168,6 +168,39 @@ bf252892f801347e8ac001613b547d18af4618ddad79909cb133d8f70758fbc5
 Use `--grub FILE --grub-sha256 HASH` to provide a different loader with
 the required modules embedded. The scripts do not sign EFI binaries.
 
+## Flashing through Melon Pi EDK2
+
+Melon Pi EDK2 firmware with user-disk Fastboot support can flash these
+raw images directly. Enter EDK2 Fastboot with F9 and check the target:
+
+```sh
+fastboot getvar product
+fastboot getvar partition-size:emmc0
+fastboot flash emmc0 out/openruyi-rva20.img
+```
+
+For an enumerated NVMe namespace, use its reported target instead:
+
+```sh
+fastboot getvar partition-size:nvme0n1
+fastboot flash nvme0n1 out/openruyi-rva20.img
+```
+
+`emmc0` is the eMMC user area. `emmc0boot0` and `emmc0boot1` are firmware
+boot areas and must not receive this disk image. NVMe names refer to
+whole namespaces, with controllers ordered by PCI address. Check the
+firmware console when several controllers are present.
+
+Flashing replaces the target's partition table and data. The host
+converts large images to sparse downloads automatically; do not use
+`-S 0` or manually split the file. The firmware flushes writes and
+verifies each written range. Reboot after flashing to discover the new
+GPT. Older firmware exposing only boot areas must be updated first;
+these commands are for EDK2 Fastboot, not the BootROM downloader.
+
+For separate installations on multiple attached disks, build a fresh
+image per disk so their filesystem UUIDs differ.
+
 ## Provenance and build files
 
 openEuler RPM signatures are checked with its repository key. openRuyi

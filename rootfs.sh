@@ -8,6 +8,7 @@ Usage: $0 --output ROOTFS.tar [options]
   --isa rva20|rva23        Repository profile (default: rva20)
   --repo URL              Override the selected repository
   --cache-dir DIR         Reuse downloaded RPMs (default: beside output)
+  --dnf COMMAND           Host DNF executable (default: auto, prefer dnf5)
   --ssh-key FILE          Public key for the default accounts
   --password-hash FILE    Override their default password hash
   --print-packages        Print the selected package list and exit
@@ -18,6 +19,7 @@ EOF_USAGE
 }
 output= distro=ruyi isa=rva20 repo= cache_dir= ssh_key= password_hash=
 print_only=0
+dnf_command=auto
 original=("$@")
 while (($#)); do
     case $1 in
@@ -26,6 +28,7 @@ while (($#)); do
         --isa) value "$@"; isa=$2; shift 2;;
         --repo) value "$@"; repo=${2%/}; shift 2;;
         --cache-dir) value "$@"; cache_dir=$(realpath -m "$2"); shift 2;;
+        --dnf) value "$@"; dnf_command=$2; shift 2;;
         --ssh-key) value "$@"; ssh_key=$(realpath "$2"); shift 2;;
         --password-hash|--root-password-hash)
             value "$@"; password_hash=$(realpath "$2"); shift 2;;
@@ -50,7 +53,9 @@ if [[ -n $password_hash ]]; then
         || die "invalid password hash"
 fi
 fresh_output "$output"
-need dnf5 rpm curl tar unshare chroot mount umount mknod python3
+need rpm curl tar unshare chroot mount umount mknod python3
+source "$SCRIPT_DIR/dnf.sh"
+select_dnf
 private_mounts "${original[@]}"
 output=$(realpath -m "$output")
 cache_dir=${cache_dir:-$(dirname "$output")/.image-cache/$distro/$isa}
@@ -69,8 +74,11 @@ if [[ -n $repo_key ]]; then
     build_key="gpgkey=file://$work/$repo_key"
     runtime_key="gpgkey=file:///etc/pki/rpm-gpg/$repo_key"
 fi
+configure_dnf_args
 cat > "$work/dnf.conf" <<EOF_DNF
 [main]
+$dnf_cache_config
+$dnf_log_config
 reposdir=$work/repos
 install_weak_deps=$weak_deps
 keepcache=True
@@ -88,22 +96,16 @@ dbpath=$(rpm --eval '%{_dbpath}')
 [[ $dbpath == /* && $dbpath != *'%'* ]] || die "invalid host RPM db path"
 mkdir -p "$root/etc/rpm"
 printf '%%_dbpath %s\n' "$dbpath" > "$root/etc/rpm/macros.image-db"
-dnf_args=(-y --config="$work/dnf.conf" --use-host-config
-    --installroot="$root" --releasever="$releasever" --forcearch=riscv64
-    --setopt="system_cachedir=$cache_dir" --setopt="logdir=$work/log"
-    --disable-repo='*' --enable-repo="image-$distro-$isa")
-if [[ $distro == euler ]]; then
-    dnf_args+=(--setopt=module_platform_id=platform:oe2403)
-fi
+echo "Host package manager: $dnf_command (DNF$dnf_major)"
 # Install the directory layout before preparing the chroot.
-dnf5 "${dnf_args[@]}" install filesystem
+"$dnf_command" "${dnf_args[@]}" install filesystem
 mount_guest "$root"
 # Install the shell before packages with pre-transaction scriptlets.
-dnf5 "${dnf_args[@]}" install "${bootstrap[@]}"
+"$dnf_command" "${dnf_args[@]}" install "${bootstrap[@]}"
 mkdir -p "$root/etc/dracut.conf.d"
 printf 'hostonly="no"\nhostonly_cmdline="no"\n' \
     > "$root/etc/dracut.conf.d/90-image.conf"
-dnf5 "${dnf_args[@]}" install "${packages[@]}"
+"$dnf_command" "${dnf_args[@]}" install "${packages[@]}"
 chroot "$root" /bin/bash -c 'test "$(uname -m)" = riscv64'
 mkdir -p "$root/etc/yum.repos.d/image" "$metadata" "$root/etc/dnf"
 cat > "$root/etc/dnf/dnf.conf" <<EOF_DNF

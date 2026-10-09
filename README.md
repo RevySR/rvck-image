@@ -24,7 +24,7 @@ version is fixed by the distribution profile.
 ## Host requirements
 
 Run the scripts with `sudo` on Linux. Required host commands come from
-DNF5, RPM, curl, GNU tar, util-linux (sfdisk 2.41+ with `--sector-size`),
+DNF4 or DNF5, RPM, curl, GNU tar, util-linux (sfdisk 2.41+ with `--sector-size`),
 dosfstools, e2fsprogs, mtools, Python 3, file and coreutils.
 Custom kernel RPM inputs also need
 rpm2cpio and cpio; Debian packages need dpkg-deb. Source builds require
@@ -38,6 +38,13 @@ unless overridden. RVA23 images require an RVA23-capable target.
 Missing tools are reported. The scripts do not install host packages.
 They download target RPMs and the selected EFI loader during a build.
 Host dracut is not required: depmod and dracut run inside the rootfs.
+
+`rootfs.sh` automatically selects `dnf5`, then `dnf`, then `dnf4` from
+the host PATH and detects its major version. Use `--dnf dnf` or
+`--dnf /path/to/dnf4` to select an executable explicitly. Both versions
+use the selected repository and reusable download cache. This host
+choice does not change the package manager inside the image: openRuyi
+uses DNF5 and openEuler uses DNF4.
 
 Builds use private mount and PID namespaces. They create minimal character
 nodes in the staging rootfs and mount `/proc` there for RPM hooks and
@@ -254,6 +261,7 @@ Run the input regression tests without root:
 ```sh
 python3 tests/test_inputs.py -v
 python3 tests/test_disk.py -v
+python3 tests/test_dnf.py -v
 ```
 
 The tests build small RPM and Debian fixtures, exercise the source-tree
@@ -264,6 +272,9 @@ Disk tests create sparse images without root or mounts, checking both
 512-byte and 4096-byte GPTs, FAT32 geometry, file population and ext4
 block size. They require sfdisk with `--sector-size`, dosfstools,
 e2fsprogs and mtools; unavailable-tool cases are skipped.
+DNF tests cover executable selection, version-specific arguments and,
+when its Python bindings are available, real DNF4 installroot configuration
+and cache paths without downloading or installing packages.
 
 Input tests, disk layout tests and shell syntax checks pass. Full image builds and boot
 tests remain to be run for both distributions.

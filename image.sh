@@ -12,6 +12,9 @@ Usage: $0 --rootfs ROOTFS.tar --output DISK.img [options]
   --kernel-version VER   Select a version from the kernel input
   --kernel-image FILE    Override Image; must match the selected modules
   --size-gib N           Image size (default: 4, minimum: 4)
+  --storage TYPE         generic, emmc, nvme or ufs (default: generic)
+  --sector-size N        Logical sector bytes: 512 or 4096 (UFS: 4096;
+                         other storage: 512). Must match the target disk.
   --grub FILE            Local EFI loader (default: pinned openEuler GRUB)
   --grub-sha256 HASH     Expected digest for a custom EFI loader
   --cmdline STRING       Override the distribution kernel command line
@@ -24,6 +27,7 @@ output= rootfs= kernel_deb= kernel_image= kernel_tree= grub= kver=
 kernel_rpms=()
 cross_compile=${CROSS_COMPILE:-} jobs=$(nproc)
 size=4 cmdline= cmdline_set=0 grub_sha=$GRUB_SHA
+storage=generic sector_size=
 original=("$@")
 while (($#)); do
     case $1 in
@@ -39,6 +43,8 @@ while (($#)); do
         --kernel-image)
             value "$@"; kernel_image=$(realpath "$2"); shift 2;;
         --size-gib) value "$@"; size=$2; shift 2;;
+        --storage) value "$@"; storage=$2; shift 2;;
+        --sector-size) value "$@"; sector_size=$2; shift 2;;
         --grub) value "$@"; grub=$(realpath "$2"); shift 2;;
         --grub-sha256) value "$@"; grub_sha=$2; shift 2;;
         --cmdline) value "$@"; cmdline=$2; cmdline_set=1; shift 2;;
@@ -56,12 +62,17 @@ sources=0
 [[ $jobs =~ ^[1-9][0-9]*$ ]] || die "jobs must be positive"
 [[ $size =~ ^[1-9][0-9]*$ && $size -ge 4 && $size -le 1024 ]] \
     || die "size must be 4..1024 GiB"
+source "$SCRIPT_DIR/disk.sh"
+configure_disk_layout
 [[ $grub_sha =~ ^[[:xdigit:]]{64}$ ]] || die "invalid GRUB SHA256"
 [[ $cmdline =~ ^[a-zA-Z0-9._,:=/\ +\-]*$ ]] \
     || die "unsupported character in --cmdline"
 fresh_output "$output"
-need unshare tar parted mkfs.vfat mkfs.ext4 blkid mcopy \
+need unshare tar sfdisk mkfs.vfat mkfs.ext4 blkid mcopy \
     chroot mount umount mknod curl sha256sum file truncate python3
+sfdisk_help=$(LC_ALL=C sfdisk --help)
+[[ $sfdisk_help == *--sector-size* ]] \
+    || die "sfdisk with --sector-size support is required (util-linux 2.41+)"
 private_mounts "${original[@]}"
 output=$(realpath -m "$output")
 work=$(mktemp -d "$(dirname "$output")/.rvck-image.XXXXXX")
@@ -105,8 +116,7 @@ fi
 printf '%s  %s\n' "$grub_sha" "$grub" | sha256sum -c -
 file "$grub" | grep -q 'RISC-V 64-bit' || die "loader is not RISC-V EFI"
 root_uuid=$(python3 -c 'import uuid; print(uuid.uuid4())')
-truncate -s 512M "$work/esp.img"
-mkfs.vfat -F 32 -n "${label^^}" "$work/esp.img"
+create_esp
 esp_uuid=$(blkid -p -s UUID -o value "$work/esp.img")
 printf 'UUID=%s / ext4 defaults,x-systemd.growfs 0 1\n' \
     "$root_uuid" > "$root/etc/fstab"
@@ -163,20 +173,12 @@ if [[ $distro == ruyi ]]; then
 fi
 printf 'source=%s\nsha256=%s\n' "$grub_source" "$grub_sha" \
     > "$metadata/initial-grub"
-root_mib=$((size * 1024 - 514))
-truncate -s "${root_mib}M" "$work/root.img"
-mkfs.ext4 -F -L "$distro-root" -U "$root_uuid" \
-    -O '^metadata_csum_seed,^orphan_file' -d "$root" "$work/root.img"
-truncate -s "${size}G" "$work/disk.img"
-last_sector=$((size * 1024 * 2048 - 2049))
-parted --script "$work/disk.img" mklabel gpt \
-    mkpart ESP fat32 2048s 1050623s set 1 esp on \
-    mkpart rootfs ext4 1050624s "${last_sector}s" type 2 "$ROOT_TYPE"
-dd if="$work/esp.img" of="$work/disk.img" bs=1M seek=1 \
-    conv=notrunc,sparse status=none
-dd if="$work/root.img" of="$work/disk.img" bs=1M seek=513 \
-    conv=notrunc,sparse status=none
+printf 'storage=%s\nsector_size=%s\n' "$storage" "$sector_size" \
+    > "$metadata/disk-layout"
+create_root_partition
+assemble_disk
 sync "$work/disk.img"
 ln "$work/disk.img" "$output"
 echo "Disk image: $output ($label, $isa, kernel $kver)"
+echo "Storage: $storage, logical sector size: $sector_size bytes"
 echo "Staging retained: $work"

@@ -24,8 +24,9 @@ version is fixed by the distribution profile.
 ## Host requirements
 
 Run the scripts with `sudo` on Linux. Required host commands come from
-DNF5, RPM, curl, GNU tar, util-linux, GNU parted, dosfstools, e2fsprogs,
-mtools, Python 3, file and coreutils. Custom kernel RPM inputs also need
+DNF5, RPM, curl, GNU tar, util-linux (sfdisk 2.41+ with `--sector-size`),
+dosfstools, e2fsprogs, mtools, Python 3, file and coreutils.
+Custom kernel RPM inputs also need
 rpm2cpio and cpio; Debian packages need dpkg-deb. Source builds require
 the kernel's build dependencies and a suitable compiler.
 
@@ -151,6 +152,31 @@ with the RISC-V Discoverable Partitions type. Filesystems are populated
 using mtools and `mkfs.ext4 -d`, then copied into a regular sparse file.
 Only paths for new image files are accepted as outputs.
 
+Images default to 512-byte logical sectors. For UFS, select `--storage ufs`
+to default to 4096-byte logical sectors:
+
+```sh
+sudo ./image.sh --rootfs out/openruyi-rva20-rootfs.tar \
+  --kernel-rpm /path/to/kernel.riscv64.rpm --storage ufs \
+  --output out/openruyi-ufs-4k.img
+```
+
+`--storage generic|emmc|nvme` defaults to 512 bytes. `--sector-size 512|4096`
+overrides any storage default, for example `--storage nvme --sector-size 4096`
+for a 4Kn namespace. Match the target's **logical** block size, not its
+physical block size or the kernel's memory page size. A 512-byte-sector
+image cannot be used unchanged on a 4096-byte-sector target (or vice versa).
+On Linux, `blockdev --getss /dev/DEVICE` reports the logical block size.
+
+GPT headers and partition LBAs use the selected sector size, as does the
+FAT32 ESP. The ESP uses one sector per cluster for 4K sectors. Ext4 uses
+4096-byte filesystem blocks. Partition byte offsets remain 1 MiB for the
+ESP and 513 MiB for root, with 1 MiB reserved at the end of the image.
+The selected storage and sector size are recorded in
+`/usr/lib/rvck-image/disk-layout`. The supplied kernel must still include
+the target's UFS controller/PHY and SCSI disk support, built in or present
+in the initramfs; the storage option selects the image layout.
+
 GRUB uses filesystem UUIDs. dracut creates a generic initramfs from
 the supplied kernel and modules. EDK2 supplies the hardware description.
 Default kernel command lines are `loglevel=3 audit=0 rw` for openRuyi and
@@ -201,6 +227,11 @@ these commands are for EDK2 Fastboot, not the BootROM downloader.
 For separate installations on multiple attached disks, build a fresh
 image per disk so their filesystem UUIDs differ.
 
+For UFS, build with `--storage ufs` and use the user-data LUN target
+reported by your firmware, after confirming its logical block size.
+UFS Fastboot availability and target names depend on the firmware; do
+not use a boot LUN for this whole-disk image.
+
 ## Provenance and build files
 
 openEuler RPM signatures are checked with its repository key. openRuyi
@@ -222,14 +253,19 @@ Run the input regression tests without root:
 
 ```sh
 python3 tests/test_inputs.py -v
+python3 tests/test_disk.py -v
 ```
 
 The tests build small RPM and Debian fixtures, exercise the source-tree
 Makefile interface and validate architecture, EFI headers and input
 selection. They use no mounts, network or real kernel compilation.
 Package tests are skipped if the relevant host packaging tool is absent.
+Disk tests create sparse images without root or mounts, checking both
+512-byte and 4096-byte GPTs, FAT32 geometry, file population and ext4
+block size. They require sfdisk with `--sector-size`, dosfstools,
+e2fsprogs and mtools; unavailable-tool cases are skipped.
 
-Input tests and shell syntax checks pass. Full image builds and boot
+Input tests, disk layout tests and shell syntax checks pass. Full image builds and boot
 tests remain to be run for both distributions.
 
 [upstream]: https://github.com/RevySR/rvck-image/

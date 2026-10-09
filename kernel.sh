@@ -1,5 +1,31 @@
 # SPDX-License-Identifier: GPL-2.0
 # Assemble the selected kernel in staging, independently of the rootfs.
+resolve_kernel_rpms() {
+    local input package canonical LC_ALL=C
+    local -a expanded=() candidates=()
+    local -A seen=()
+    for input in "${kernel_rpms[@]}"; do
+        if [[ -d $input ]]; then
+            candidates=()
+            for package in "$input"/*.rpm; do
+                [[ -f $package ]] && candidates+=("$package")
+            done
+            ((${#candidates[@]})) || die "no RPM files in directory: $input"
+        else
+            [[ -f $input ]] || die "kernel RPM does not exist: $input"
+            candidates=("$input")
+        fi
+        for package in "${candidates[@]}"; do
+            canonical=$(realpath "$package")
+            if [[ ! ${seen[$canonical]+present} ]]; then
+                expanded+=("$canonical")
+                seen[$canonical]=1
+            fi
+        done
+    done
+    kernel_rpms=("${expanded[@]}")
+}
+
 prepare_kernel_image() {
     local input=$1 output=$2 description
     local -a unpack
@@ -26,6 +52,7 @@ prepare_kernel_image() {
 
 install_kernel() {
     local kernel_root module_base built_version candidate name package
+    local package_info package_arch
     local -a versions
     kernel_root=$work/kernel
     if [[ -n $kernel_tree ]]; then
@@ -57,8 +84,14 @@ install_kernel() {
     elif ((${#kernel_rpms[@]})); then
         need rpm rpm2cpio cpio
         for package in "${kernel_rpms[@]}"; do
-            [[ $(rpm -qp --qf '%{ARCH}' "$package") == riscv64 ]] \
-                || die "kernel RPM is not riscv64: $package"
+            package_info=$(rpm -qp --qf '%{ARCH} %{SOURCEPACKAGE}' "$package")
+            [[ $package_info != *' 1' ]] \
+                || die "source RPM cannot supply a kernel: $package"
+            package_arch=${package_info%% *}
+            [[ $package_arch == riscv64 || $package_arch == noarch ]] \
+                || die "kernel RPM is not riscv64 or noarch: $package"
+        done
+        for package in "${kernel_rpms[@]}"; do
             (cd "$work/kernel"; rpm2cpio "$package" \
                 | cpio -idm --quiet --no-absolute-filenames)
         done

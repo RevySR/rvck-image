@@ -100,6 +100,7 @@ case $mode in
     rpm) kernel_rpms=("$@");;
     tree) kernel_tree=$1;;
 esac
+resolve_kernel_rpms
 install_kernel
 printf '%s' "$kver" > "$work/version"
 '''
@@ -173,6 +174,84 @@ printf '%s' "$kver" > "$work/version"
         self.install('rpm', *self.rpms())
 
     @unittest.skipUnless(all(shutil.which(x) for x in
+                            ('rpmbuild', 'rpm2cpio', 'cpio')), 'needs RPM')
+    def test_kernel_rpm_directory(self):
+        packages = self.rpms()
+        directory = self.path / 'kernel rpms'
+        directory.mkdir()
+        for package in packages:
+            shutil.copy(package, directory)
+        (directory / 'README').write_text('not a package')
+        # Mixing a directory, an explicit file and its symlink is supported.
+        alias = self.path / 'alias.rpm'
+        alias.symlink_to(directory / packages[0].name)
+        self.install('rpm', directory, directory / packages[0].name, alias)
+
+    def test_rpm_input_resolution(self):
+        directory = self.path / 'kernel rpms'
+        directory.mkdir()
+        for name in ('b.rpm', 'a.rpm', 'README'):
+            (directory / name).write_text('fixture')
+        nested = directory / 'nested'
+        nested.mkdir()
+        (nested / 'ignored.rpm').write_text('fixture')
+        result = run('bash', '-c', '''
+source "$1/common.sh"
+source "$1/kernel.sh"
+kernel_rpms=("$2" "$2/a.rpm")
+resolve_kernel_rpms
+printf '%s\\n' "${kernel_rpms[@]}"
+''', 'test', str(REPO), str(directory))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.splitlines(),
+                         [str(directory / 'a.rpm'), str(directory / 'b.rpm')])
+
+    def test_multiple_rpm_cli_arguments(self):
+        dummy = str(REPO / 'README.md')
+        # Reaching jobs validation proves all RPM paths/options were consumed.
+        result = run(str(REPO / 'image.sh'), '--rootfs', dummy,
+                     '--output', str(self.path / 'unused.img'),
+                     '--kernel-rpm', dummy, dummy, '--kernel-rpm', dummy,
+                     '--jobs', '0')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('jobs must be positive', result.stderr)
+
+    @unittest.skipUnless(all(shutil.which(x) for x in
+                            ('rpmbuild', 'rpm2cpio', 'cpio')), 'needs RPM')
+    def test_noarch_modules_rpm(self):
+        self.install('rpm', *self.rpms(modules_noarch=True))
+
+    @unittest.skipUnless(all(shutil.which(x) for x in
+                            ('rpmbuild', 'rpm2cpio', 'cpio')), 'needs RPM')
+    def test_wrong_rpm_architecture(self):
+        self.install('rpm', *self.rpms(arch='x86_64'),
+                     expected_error='kernel RPM is not riscv64 or noarch')
+        self.assertFalse((self.path / 'work/kernel/boot').exists())
+
+    @unittest.skipUnless(all(shutil.which(x) for x in
+                            ('rpmbuild', 'rpm2cpio', 'cpio')), 'needs RPM')
+    def test_source_rpm_rejected(self):
+        self.install('rpm', *self.rpms(source=True),
+                     expected_error='source RPM cannot supply a kernel')
+        self.assertFalse((self.path / 'work/kernel/kernel.spec').exists())
+
+    def test_invalid_rpm_inputs(self):
+        dummy = str(REPO / 'README.md')
+        empty = self.path / 'empty'
+        empty.mkdir()
+        for paths, error in [
+                ([str(empty)], 'no RPM files in directory'),
+                ([str(self.path / 'missing.rpm')], 'kernel RPM does not exist'),
+                ([dummy, str(empty)], 'no RPM files in directory'),
+                ([], 'missing value for --kernel-rpm')]:
+            result = run(str(REPO / 'image.sh'), '--rootfs', dummy,
+                         '--output', str(self.path / 'unused.img'),
+                         '--kernel-rpm', *paths)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(error, result.stderr)
+            self.assertFalse((self.path / 'unused.img').exists())
+
+    @unittest.skipUnless(all(shutil.which(x) for x in
                             ('rpmbuild', 'rpm2cpio', 'cpio', 'gzip')),
                          'needs RPM and gzip')
     def test_gzip_kernel_in_modules_directory(self):
@@ -225,7 +304,8 @@ printf '%s' "$kver" > "$work/version"
         self.install('deb', self.deb(),
                      expected_error='decompressed kernel is not a RISC-V')
 
-    def rpms(self, module_kernel=False):
+    def rpms(self, module_kernel=False, modules_noarch=False, arch='riscv64',
+             source=False):
         kernel_path = f'/boot/vmlinuz-{VERSION}'
         exclude = ghost = ''
         if module_kernel:
@@ -242,6 +322,7 @@ AutoReqProv: no
 %description
 Kernel extraction fixture.
 %package modules
+{'BuildArch: noarch' if modules_noarch else ''}
 Summary: Module input fixture
 AutoReqProv: no
 %description modules
@@ -256,14 +337,15 @@ cp -a {self.payload}/. %{{buildroot}}/
 /lib/modules/{VERSION}
 {exclude}
 ''')
-        result = run('rpmbuild', '-bb', '--target', 'riscv64',
+        result = run('rpmbuild', '-bs' if source else '-bb', '--target', arch,
                      '--define', f'_topdir {self.path}/rpm',
                      '--define', f'_tmppath {self.path}',
                      '--define', '__os_install_post %{nil}', str(spec))
         self.assertEqual(result.returncode, 0,
                          result.stdout + result.stderr)
-        packages = sorted((self.path / 'rpm/RPMS').rglob('*.rpm'))
-        self.assertEqual(len(packages), 2)
+        package_dir = 'rpm/SRPMS' if source else 'rpm/RPMS'
+        packages = sorted((self.path / package_dir).rglob('*.rpm'))
+        self.assertEqual(len(packages), 1 if source else 2)
         return packages
 
 

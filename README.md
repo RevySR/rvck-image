@@ -115,7 +115,8 @@ both accounts. `--print-packages` lists packages without root access.
 For either distribution, select exactly one kernel source when running
 `image.sh`. There is no implicit fallback to a rootfs kernel:
 
-- `--kernel-rpm FILE`, repeatable for split kernel and modules packages.
+- `--kernel-rpm PATH...` for one or more RPM files or directories;
+  repeatable for split kernel and modules packages.
 - `--kernel-deb FILE` for a RISC-V Debian kernel package.
 - `--kernel-tree DIR` for a configured source/build tree; optionally add
   `--cross-compile PREFIX` and `--jobs N`.
@@ -123,6 +124,27 @@ For either distribution, select exactly one kernel source when running
 Custom packages are extracted without executing installation hooks or
 registering them in the rootfs package database. They must include
 matching modules and a RISC-V kernel Image with EFI stub support.
+RPM inputs may be `riscv64` or `noarch`; other architectures and source
+RPMs are rejected before extraction. Each directory contributes its
+immediate `*.rpm` files in filename order, without scanning subdirectories.
+Explicit input order is preserved and repeated canonical file paths are
+deduplicated. Empty directories and missing files are errors. Use a
+directory containing packages for the intended kernel build; if it
+contains multiple kernel versions, select one with `--kernel-version`.
+
+For example, supply a directory of split RPMs:
+
+```sh
+sudo ./image.sh --rootfs out/openruyi-rva20-rootfs.tar \
+  --kernel-rpm /path/to/RPMS/riscv64 --storage ufs \
+  --output out/openruyi-ufs.img
+```
+
+Or pass files directly with `--kernel-rpm kernel-core.rpm kernel-modules.rpm`.
+Multiple `--kernel-rpm` options and mixtures of files and directories
+are also accepted. These inputs assemble the kernel; extra userspace
+packages are not installed through this option.
+
 Raw and gzip, bzip2, xz, lzma, lz4, lzop or zstd-compressed Images are
 accepted; compressed inputs require the corresponding host decompressor.
 Missing decompressors are reported without installing anything. Kernel

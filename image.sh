@@ -4,7 +4,8 @@ source "$(dirname "$(readlink -f "$0")")/common.sh"
 usage() {
     cat <<EOF
 Usage: $0 --rootfs ROOTFS.tar --output DISK.img [options]
-  --kernel-rpm FILE       Custom kernel RPM; repeat for split modules
+  --kernel-rpm PATH...    Kernel RPM files or directories; repeatable
+                         Directories include immediate *.rpm files
   --kernel-deb FILE       Alternative Debian kernel package
   --kernel-tree DIR       Configured source/build tree; build Image/modules
   --cross-compile PREFIX  Source build compiler prefix
@@ -34,7 +35,13 @@ while (($#)); do
         --output) value "$@"; output=$2; shift 2;;
         --rootfs) value "$@"; rootfs=$(realpath "$2"); shift 2;;
         --kernel-rpm)
-            value "$@"; kernel_rpms+=("$(realpath "$2")"); shift 2;;
+            value "$@"
+            [[ $2 != -* ]] || die "missing value for --kernel-rpm"
+            shift
+            while (($#)) && [[ $1 != -* ]]; do
+                kernel_rpms+=("$1")
+                shift
+            done;;
         --kernel-deb) value "$@"; kernel_deb=$(realpath "$2"); shift 2;;
         --kernel-tree) value "$@"; kernel_tree=$(realpath "$2"); shift 2;;
         --cross-compile) value "$@"; cross_compile=$2; shift 2;;
@@ -59,6 +66,8 @@ sources=0
 [[ ${#kernel_rpms[@]} == 0 ]] || sources=$((sources+1))
 ((sources == 1)) || die \
     "select one kernel input: --kernel-rpm, --kernel-deb or --kernel-tree"
+source "$SCRIPT_DIR/kernel.sh"
+resolve_kernel_rpms
 [[ $jobs =~ ^[1-9][0-9]*$ ]] || die "jobs must be positive"
 [[ $size =~ ^[1-9][0-9]*$ && $size -ge 4 && $size -le 1024 ]] \
     || die "size must be 4..1024 GiB"
@@ -105,7 +114,6 @@ else
     default_cmdline='console=ttyS0,115200 earlycon loglevel=7'
 fi
 ((cmdline_set)) || cmdline=$default_cmdline
-source "$SCRIPT_DIR/kernel.sh"
 install_kernel
 grub_source=$grub
 if [[ -z $grub ]]; then

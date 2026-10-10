@@ -65,6 +65,7 @@ metadata=$root/usr/lib/rvck-image
 mkdir -p "$root/etc/yum.repos.d" "$work/repos" "$cache_dir"
 trap cleanup EXIT
 check_arch
+configure_rpm_database
 curl --fail --location --retry 3 "$repo/repodata/repomd.xml" \
     -o "$work/repomd.xml"
 build_key= runtime_key=
@@ -91,17 +92,16 @@ enabled=True
 gpgcheck=$gpgcheck
 $build_key
 EOF_DNF
-# Match the host transaction database for target RPM scriptlets too.
-dbpath=$(rpm --eval '%{_dbpath}')
-[[ $dbpath == /* && $dbpath != *'%'* ]] || die "invalid host RPM db path"
-mkdir -p "$root/etc/rpm"
-printf '%%_dbpath %s\n' "$dbpath" > "$root/etc/rpm/macros.image-db"
 echo "Host package manager: $dnf_command (DNF$dnf_major)"
 # Install the directory layout before preparing the chroot.
 "$dnf_command" "${dnf_args[@]}" install filesystem
 mount_guest "$root"
 # Install the shell before packages with pre-transaction scriptlets.
 "$dnf_command" "${dnf_args[@]}" install "${bootstrap[@]}"
+# Verify native target RPM sees the host transactions before continuing.
+[[ $(chroot "$root" rpm --eval '%{_dbpath}:%{_db_backend}') == /var/lib/rpm:ndb ]] \
+    || die "target RPM database configuration differs from the build"
+chroot "$root" rpm -q filesystem bash rpm
 mkdir -p "$root/etc/dracut.conf.d"
 printf 'hostonly="no"\nhostonly_cmdline="no"\n' \
     > "$root/etc/dracut.conf.d/90-image.conf"

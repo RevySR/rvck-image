@@ -46,6 +46,12 @@ use the selected repository and reusable download cache. This host
 choice does not change the package manager inside the image: openRuyi
 uses DNF5 and openEuler uses DNF4.
 
+Both profiles use an NDB RPM database at `/var/lib/rpm`. Host RPM must
+support NDB. The build overrides the host RPM defaults inside its private
+mount namespace, then checks that the target RPM can read the installed
+bootstrap packages. Host configuration files are not changed on disk;
+no host database path override is saved in the image.
+
 Builds use private mount and PID namespaces. They create minimal character
 nodes in the staging rootfs and mount `/proc` there for RPM hooks and
 Bash process substitution. Host `/dev` and `/sys` are not bind-mounted.
@@ -296,7 +302,10 @@ block size. They require sfdisk with `--sector-size`, dosfstools,
 e2fsprogs and mtools; unavailable-tool cases are skipped.
 DNF tests cover executable selection, version-specific arguments and,
 when its Python bindings are available, real DNF4 installroot configuration
-and cache paths without downloading or installing packages.
+and cache paths. With RPM build tools and unprivileged mount namespaces,
+they also install a local fixture through available DNF versions and verify
+that subsequent transactions use the target NDB database. These checks need
+no downloads and leave host RPM configuration unchanged.
 
 Input tests, disk layout tests and shell syntax checks pass. Full image builds and boot
 tests remain to be run for both distributions.

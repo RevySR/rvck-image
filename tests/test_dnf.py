@@ -2,6 +2,8 @@
 # SPDX-License-Identifier: GPL-2.0
 """Check host DNF selection and installroot configuration without downloads."""
 import json
+import os
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -146,6 +148,90 @@ with dnf.cli.cli.BaseCli() as base:
         self.assertEqual(config['installroot'], str(work / 'root'))
         self.assertEqual(config['arch'], 'riscv64')
         self.assertEqual(config['repos'], ['image-ruyi-rva20'])
+
+    @unittest.skipUnless(all(shutil.which(x) for x in ('rpm', 'rpmbuild', 'unshare')),
+                         'needs RPM and user namespaces')
+    def test_native_database_transactions(self):
+        probe = subprocess.run(['unshare', '--user', '--map-root-user', '--mount',
+                                'true'], capture_output=True)
+        if probe.returncode:
+            self.skipTest('needs unprivileged mount namespaces')
+        spec = self.path / 'fixture.spec'
+        spec.write_text('''Name: image-db-fixture
+Version: 1
+Release: 1
+Summary: RPM database regression fixture
+License: MIT
+BuildArch: noarch
+%description
+No scriptlets or dependencies.
+%install
+mkdir -p %{buildroot}/usr/share/image-db-fixture
+echo fixture > %{buildroot}/usr/share/image-db-fixture/data
+%files
+/usr/share/image-db-fixture
+''')
+        result = subprocess.run(['rpmbuild', '--define', f'_topdir {self.path}/build',
+                                 '--define', f'_tmppath {self.path}',
+                                 '-bb', str(spec)], text=True, capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        package = next((self.path / 'build/RPMS/noarch').glob('*.rpm'))
+        # Reproduce Debian defaults in a private user macro file, including
+        # a path with spaces. The production override must win over this file.
+        config = self.path / 'config space'
+        (config / 'rpm').mkdir(parents=True)
+        macros = config / 'rpm/macros'
+        original = '%_dbpath /root/.rpmdb\n%_db_backend sqlite\n'
+        macros.write_text(original)
+        env = dict(os.environ, XDG_CONFIG_HOME=str(config))
+        script = '''
+source "$1/common.sh"
+source "$1/dnf.sh"
+work=$2 root=$2/root cache_dir=$2/cache distro=ruyi isa=rva20
+mkdir -p "$root" "$cache_dir" "$work/repos"
+trap cleanup EXIT
+# DNF --version opens host logs as root; keep test writes in the fixture.
+mkdir -p "$work/host-log" "$work/host-tmp"
+mount --bind "$work/host-log" /var/log
+mounts+=(/var/log)
+mount --bind "$work/host-tmp" /var/tmp
+mounts+=(/var/tmp)
+configure_rpm_database
+if [[ $4 == rpm ]]; then
+    rpm --root "$root" --nodeps --noscripts -i "$3"
+else
+    dnf_command=$4
+    select_dnf
+    load_profile "$distro" "$isa"
+    configure_dnf_args
+    printf '[main]\\n%s\\n%s\\ngpgcheck=False\\n' \\
+        "$dnf_cache_config" "$dnf_log_config" > "$work/dnf.conf"
+    printf '[image-ruyi-rva20]\\nname=fixture\\nbaseurl=file:///unused\\n' \\
+        >> "$work/dnf.conf"
+    if [[ $dnf_major == 5 ]]; then disable='--disable-repo=*';
+    else disable='--disablerepo=*'; fi
+    "$dnf_command" "${dnf_args[@]}" "$disable" install "$3"
+    # A second process must read the same database successfully.
+    "$dnf_command" "${dnf_args[@]}" "$disable" list --installed image-db-fixture
+fi
+rpm --root "$root" -q image-db-fixture
+test -f "$root/var/lib/rpm/Packages.db"
+test ! -e "$root/root/.rpmdb"
+test ! -e "$root/var/lib/rpm/rpmdb.sqlite"
+test ! -e "$root/etc/rpm/macros.image-db"
+'''
+        commands = ['rpm'] + [x for x in ('dnf', 'dnf4', 'dnf5') if shutil.which(x)]
+        for command in commands:
+            with self.subTest(command=command):
+                work = self.path / f'{command} staging'
+                result = subprocess.run(
+                    ['unshare', '--user', '--map-root-user', '--mount',
+                     '--propagation', 'private', '/bin/bash', '-c', script,
+                     'test', str(REPO), str(work), str(package), command],
+                    env=env, text=True, capture_output=True)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertIn('image-db-fixture', result.stdout)
+                self.assertEqual(macros.read_text(), original)
 
 
 if __name__ == '__main__':

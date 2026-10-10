@@ -31,7 +31,7 @@ load_profile() {
         die "the openEuler profile supports RVA20 only"
     fi
     if [[ $1 == ruyi ]]; then
-        default_repo=https://boat.openruyi.cn/unstable/$2
+        default_repo=https://boat.openruyi.cn/stable/$2
     else
         default_repo=$EULER_REPO
     fi

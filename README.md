@@ -6,7 +6,7 @@ its GPL-2.0 license.
 
 | Profile | Repository | ISA | Kernel |
 | --- | --- | --- | --- |
-| `ruyi` | openRuyi unstable | RVA20 / RVA23 | External input |
+| `ruyi` | openRuyi stable | RVA20 / RVA23 | External input |
 | `euler` | openEuler 24.03-LTS-SP3 | RVA20 | External input |
 
 The default profile is `ruyi`. It selects the common, bootstrap and
@@ -70,8 +70,8 @@ sudo ./image.sh --rootfs out/openruyi-rva20-rootfs.tar \
 ```
 
 For RVA23, change `--isa rva20` to `--isa rva23` and choose new output
-names. The repositories are `https://boat.openruyi.cn/unstable/rva20/`
-and `https://boat.openruyi.cn/unstable/rva23/`. Both use `riscv64` RPMs.
+names. The repositories are `https://boat.openruyi.cn/stable/rva20/`
+and `https://boat.openruyi.cn/stable/rva23/`. Both use `riscv64` RPMs.
 `image.sh` reads the distribution and ISA recorded in the rootfs.
 
 The default accounts are `root` and `openruyi`, with the password hash
@@ -274,8 +274,8 @@ currently follows Kiwi's signature policy (`gpgcheck=False`); HTTPS and
 repository checksums do not replace RPM signature verification.
 
 Repository metadata, requested and installed package lists, ISA and
-loader provenance are recorded in `/usr/lib/rvck-image`. Unstable is a
-moving repository; these records describe a build, not a frozen snapshot.
+loader provenance are recorded in `/usr/lib/rvck-image`. Repository contents
+can change; these records describe a build, not a frozen snapshot.
 
 Existing outputs are never overwritten. Staging directories are retained
 beside the outputs as `.rvck-rootfs.*` and `.rvck-image.*` for inspection.

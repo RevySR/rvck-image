@@ -77,8 +77,9 @@ and `https://boat.openruyi.cn/stable/rva23/`. Both use `riscv64` RPMs.
 The default accounts are `root` and `openruyi`, with the password hash
 from the Kiwi configuration. `openruyi` belongs to `wheel`. The hostname
 is `openruyi`, the timezone is UTC and the locale is `C.UTF-8`.
-NetworkManager and SSH are enabled. Desktop and live installer profiles
-are not included.
+NetworkManager and SSH are enabled. The `systemd-udev` package is explicitly
+required to provide `systemd-udevd` for device management. Desktop and live
+installer profiles are not included.
 
 The initial EFI loader is openEuler GRUB. A login reminder requests:
 

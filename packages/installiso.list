@@ -50,6 +50,7 @@ system-minimal
 systemd-repart
 systemd-resolved
 systemd-timesyncd
+systemd-udev
 tar
 unzip
 util-linux

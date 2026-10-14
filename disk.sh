@@ -24,6 +24,17 @@ create_esp() {
         -n "${label^^}" "$work/esp.img"
 }
 
+create_grubenv() {
+    # grub2-editenv in some distributions probes the backing block device,
+    # which does not exist for our staging directory. Write the standard
+    # empty environment block directly; mkfs.ext4 will populate it later.
+    python3 - "$root$grub_dir/grubenv" <<'PY'
+from pathlib import Path
+import sys
+Path(sys.argv[1]).write_bytes(b'# GRUB Environment Block\n'.ljust(1024, b'#'))
+PY
+}
+
 create_root_partition() {
     truncate -s "${root_mib}M" "$work/root.img"
     mkfs.ext4 -F -b 4096 -L "$distro-root" -U "$root_uuid" \

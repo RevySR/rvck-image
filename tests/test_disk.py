@@ -29,6 +29,36 @@ def disk_tools_available():
 
 
 class Disk(unittest.TestCase):
+    @unittest.skipUnless(shutil.which('grub-editenv') or shutil.which('grub2-editenv'),
+                         'needs a host GRUB environment editor')
+    def test_grub_environment(self):
+        editor = shutil.which('grub-editenv') or shutil.which('grub2-editenv')
+        for grub_dir in ('/boot/grub', '/boot/grub2'):
+            with self.subTest(grub_dir=grub_dir), \
+                    tempfile.TemporaryDirectory(prefix='image-grub-') as tmp:
+                root = Path(tmp) / 'staging root'
+                path = root / grub_dir.lstrip('/') / 'grubenv'
+                path.parent.mkdir(parents=True)
+                # Replace any pre-existing environment with an empty block.
+                path.write_text('stale environment\n' * 100)
+                result = run('bash', '-c', '''
+source "$1/common.sh"
+source "$1/disk.sh"
+root=$2 grub_dir=$3
+create_grubenv
+''', 'test', str(REPO), str(root), grub_dir)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertEqual(path.stat().st_size, 1024)
+                result = run(editor, str(path), 'list')
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout, '')
+                result = run(editor, str(path), 'set', 'saved_entry=fixture')
+                self.assertEqual(result.returncode, 0, result.stderr)
+                result = run(editor, str(path), 'list')
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout, 'saved_entry=fixture\n')
+                self.assertEqual(path.stat().st_size, 1024)
+
     def test_storage_defaults_and_overrides(self):
         for storage, override, expected in [
                 ('generic', '', 512), ('emmc', '', 512), ('nvme', '', 512),

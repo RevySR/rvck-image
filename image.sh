@@ -160,7 +160,7 @@ menuentry '$label ($isa, $kver)' {
 }
 EOF
 chroot "$root" "${grub_prefix}script-check" "$grub_dir/grub.cfg"
-chroot "$root" "${grub_prefix}editenv" "$grub_dir/grubenv" create
+create_grubenv
 unmount_guest
 for directory in BOOT "$label" openEuler; do
     mkdir -p "$work/esp-tree/EFI/$directory"

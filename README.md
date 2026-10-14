@@ -218,8 +218,10 @@ The selected storage and sector size are recorded in
 the target's UFS controller/PHY and SCSI disk support, built in or present
 in the initramfs; the storage option selects the image layout.
 
-GRUB uses filesystem UUIDs. dracut creates a generic initramfs from
-the supplied kernel and modules. EDK2 supplies the hardware description.
+GRUB uses filesystem UUIDs. Its empty 1024-byte `grubenv` is written directly
+so image creation does not require GRUB to probe staging block devices.
+dracut creates a generic initramfs from the supplied kernel and modules.
+EDK2 supplies the hardware description.
 Default kernel command lines are `loglevel=3 audit=0 rw` for openRuyi and
 `console=ttyS0,115200 earlycon loglevel=7` for openEuler. Override them
 with `--cmdline STRING`. openRuyi includes a systemd-repart configuration

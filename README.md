@@ -8,6 +8,7 @@ its GPL-2.0 license.
 | --- | --- | --- | --- |
 | `ruyi` | openRuyi stable | RVA20 / RVA23 | External input |
 | `euler` | openEuler 24.03-LTS-SP3 | RVA20 | External input |
+| `euler` | openEuler 24.03-LTS-SP4 | RVA23 | External input |
 
 The default profile is `ruyi`. It selects the common, bootstrap and
 `installiso` packages from
@@ -94,8 +95,9 @@ mounted at `/boot/efi`; the image's fstab provides this mount.
 
 ## openEuler
 
-The original RVA20 workflow remains available. Supply a RISC-V kernel
-RPM, Debian package, or configured source tree when creating the image:
+RVA20 uses openEuler 24.03-LTS-SP3; RVA23 uses 24.03-LTS-SP4.
+Supply a RISC-V kernel RPM, Debian package, or configured source tree when
+creating the image:
 
 ```sh
 sudo ./rootfs.sh --distro euler --isa rva20 \
@@ -104,6 +106,9 @@ sudo ./image.sh --rootfs out/openeuler-rva20-rootfs.tar \
   --kernel-rpm /path/to/kernel.riscv64.rpm \
   --output out/openeuler-rva20.img
 ```
+
+For RVA23, use `--isa rva23` and corresponding output names. Its repository
+is `https://dl-cdn.openeuler.openatom.cn/openEuler-24.03-LTS-SP4/OS/riscv64/rva23/riscv64/`.
 
 The root password remains `openEuler12#$`, as in the original project.
 The hostname is `rvck`. Root SSH password login is disabled; use a key.

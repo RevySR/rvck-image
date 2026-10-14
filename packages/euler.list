@@ -1,4 +1,4 @@
-# Original rvck-image openEuler RVA20 rootfs, with an external kernel.
+# openEuler SP3 RVA20 / SP4 RVA23 rootfs, with an external kernel.
 basesystem
 filesystem
 bash

@@ -63,7 +63,7 @@ printf '%s:%s' "$dnf_command" "$dnf_major"
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('expected DNF4 or DNF5', result.stderr)
 
-    def arguments(self, major, distro):
+    def arguments(self, major, distro, isa='rva20'):
         work = self.path / 'staging space'
         (work / 'root').mkdir(parents=True, exist_ok=True)
         (work / 'repos').mkdir(exist_ok=True)
@@ -72,21 +72,22 @@ printf '%s:%s' "$dnf_command" "$dnf_major"
         result = subprocess.run(['/bin/bash', '-c', '''
 source "$1/common.sh"
 source "$1/dnf.sh"
-work=$2 root=$2/root cache_dir=$3 dnf_major=$4 distro=$5 isa=rva20
+work=$2 root=$2/root cache_dir=$3 dnf_major=$4 distro=$5 isa=$6
 load_profile "$distro" "$isa"
 configure_dnf_args
 printf '%s\\n' "$dnf_cache_config" "$dnf_log_config" > "$work/paths.conf"
 printf '%s\0' "${dnf_args[@]}"
 '''.replace('\0', '\\0'), 'test', str(REPO), str(work), str(cache),
-                                 str(major), distro], capture_output=True)
+                                 str(major), distro, isa], capture_output=True)
         self.assertEqual(result.returncode, 0, result.stderr.decode())
         return result.stdout.decode().rstrip('\0').split('\0'), work, cache
 
     def test_version_specific_arguments(self):
         for major in (4, 5):
-            for distro in ('ruyi', 'euler'):
-                with self.subTest(major=major, distro=distro):
-                    args, work, cache = self.arguments(major, distro)
+            for distro, isa in [('ruyi', 'rva20'), ('ruyi', 'rva23'),
+                                ('euler', 'rva20'), ('euler', 'rva23')]:
+                with self.subTest(major=major, distro=distro, isa=isa):
+                    args, work, cache = self.arguments(major, distro, isa)
                     self.assertIn('--forcearch=riscv64', args)
                     self.assertIn(f'--setopt=reposdir={work}/repos', args)
                     self.assertEqual('--setopt=module_platform_id=platform:oe2403'
@@ -94,12 +95,12 @@ printf '%s\0' "${dnf_args[@]}"
                     if major == 5:
                         self.assertIn('--use-host-config', args)
                         self.assertIn(f'--setopt=system_cachedir={cache}', args)
-                        self.assertIn(f'--enable-repo=image-{distro}-rva20', args)
+                        self.assertIn(f'--enable-repo=image-{distro}-{isa}', args)
                         self.assertIn('--disable-repo=*', args)
                     else:
                         self.assertNotIn('--use-host-config', args)
                         self.assertFalse(any('system_cachedir=' in x for x in args))
-                        self.assertIn(f'--enablerepo=image-{distro}-rva20', args)
+                        self.assertIn(f'--enablerepo=image-{distro}-{isa}', args)
                         self.assertIn('--disablerepo=*', args)
                         for option, expected in [('cachedir', cache),
                                                  ('logdir', work / 'log')]:

@@ -27,11 +27,11 @@ load_profile() {
         *) die "distro must be euler or ruyi";;
     esac
     case $2 in rva20|rva23) ;; *) die "ISA must be rva20 or rva23";; esac
-    if [[ $1 == euler && $2 != rva20 ]]; then
-        die "the openEuler profile supports RVA20 only"
-    fi
     if [[ $1 == ruyi ]]; then
         default_repo=https://boat.openruyi.cn/stable/$2
+    elif [[ $2 == rva23 ]]; then
+        default_repo=https://dl-cdn.openeuler.openatom.cn
+        default_repo+=/openEuler-24.03-LTS-SP4/OS/riscv64/rva23/riscv64
     else
         default_repo=$EULER_REPO
     fi

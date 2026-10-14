@@ -52,7 +52,7 @@ class Inputs(unittest.TestCase):
 
     def test_profiles_have_no_kernel(self):
         for distro, isa in [('ruyi', 'rva20'), ('ruyi', 'rva23'),
-                            ('euler', 'rva20')]:
+                            ('euler', 'rva20'), ('euler', 'rva23')]:
             with self.subTest(distro=distro, isa=isa):
                 names = self.packages('--distro', distro, '--isa', isa)
                 self.assertFalse(names & {'linux', 'kernel', 'linux-core',
@@ -64,10 +64,29 @@ class Inputs(unittest.TestCase):
 
     def test_invalid_profile(self):
         for args in [('--distro', 'bad'), ('--isa', 'bad'),
-                     ('--distro', 'euler', '--isa', 'rva23')]:
+                     ('--distro', 'euler', '--isa', 'bad')]:
             result = run(str(REPO / 'rootfs.sh'), *args,
                          '--print-packages')
             self.assertNotEqual(result.returncode, 0)
+
+    def test_profile_repositories(self):
+        result = run('bash', '-c', '''
+source "$1/common.sh"
+for distro in euler ruyi; do
+    for isa in rva23 rva20; do
+        load_profile "$distro" "$isa"
+        printf '%s\\n' "$default_repo"
+    done
+done
+''', 'test', str(REPO))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        base = 'https://dl-cdn.openeuler.openatom.cn'
+        self.assertEqual(result.stdout.splitlines(), [
+            f'{base}/openEuler-24.03-LTS-SP4/OS/riscv64/rva23/riscv64',
+            f'{base}/openEuler-24.03-LTS-SP3/OS/riscv64/rva20/riscv64',
+            'https://boat.openruyi.cn/stable/rva23',
+            'https://boat.openruyi.cn/stable/rva20',
+        ])
 
     def test_kernel_input_required_and_exclusive(self):
         dummy = str(REPO / 'README.md')

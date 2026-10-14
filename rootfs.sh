@@ -13,7 +13,7 @@ Usage: $0 --output ROOTFS.tar [options]
   --password-hash FILE    Override their default password hash
   --print-packages        Print the selected package list and exit
 Build a reusable rootfs; supply the kernel separately to image.sh.
-openRuyi uses stable; openEuler uses 24.03-LTS-SP3 RVA20.
+openRuyi uses stable; openEuler uses 24.03-LTS-SP3 for RVA20 and SP4 for RVA23.
 Run with sudo. Host tools are checked, never installed automatically.
 EOF_USAGE
 }

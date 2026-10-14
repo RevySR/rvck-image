@@ -227,7 +227,7 @@ so image creation does not require GRUB to probe staging block devices.
 dracut creates a generic initramfs from the supplied kernel and modules.
 EDK2 supplies the hardware description.
 Default kernel command lines are `loglevel=3 audit=0 rw` for openRuyi and
-`console=ttyS0,115200 earlycon loglevel=7` for openEuler. Override them
+`earlycon loglevel=7 audit=0` for openEuler. Override them
 with `--cmdline STRING`. openRuyi includes a systemd-repart configuration
 for growing the root partition when deployed to a larger disk.
 

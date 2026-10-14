@@ -111,7 +111,7 @@ if [[ $distro == ruyi ]]; then
 else
     grub_prefix=grub2-
     grub_dir=/boot/grub2
-    default_cmdline='console=ttyS0,115200 earlycon loglevel=7'
+    default_cmdline='earlycon loglevel=7 audit=0'
 fi
 ((cmdline_set)) || cmdline=$default_cmdline
 install_kernel

@@ -132,6 +132,8 @@ printf 'UUID=%s /boot/efi vfat umask=0077 0 2\n' \
     "$esp_uuid" >> "$root/etc/fstab"
 mount_guest "$root"
 chroot "$root" depmod -a "$kver"
+install -D -m 755 "$SCRIPT_DIR/files/dracut/91image-ufs/module-setup.sh" \
+    "$root/usr/lib/dracut/modules.d/91image-ufs/module-setup.sh"
 chroot "$root" dracut --force --no-hostonly --no-hostonly-cmdline \
     "/boot/initramfs-$kver.img" "$kver"
 [[ -s $root/boot/initramfs-$kver.img ]] \

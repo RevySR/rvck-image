@@ -183,7 +183,11 @@ sudo ./image.sh --rootfs out/openruyi-rva20-rootfs.tar \
 The kernel must support the target hardware and userspace ISA. A generic
 rootfs does not add missing board drivers. Install matching modules into
 the image; dracut includes available storage drivers without requiring
-virtio to be enabled in every supplied kernel.
+virtio to be enabled in every supplied kernel. The image builder installs
+a dracut module that explicitly includes available UFS core and host
+drivers, including their module dependencies. This also applies to later
+initramfs rebuilds inside the image; older dracut storage detection can
+otherwise omit UFS host drivers.
 
 ## Disk layout and boot
 
